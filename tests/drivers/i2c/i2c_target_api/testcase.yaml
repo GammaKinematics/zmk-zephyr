@@ -14,12 +14,23 @@ tests:
       - nucleo_g474re
       - nucleo_f091rc
       - stm32f072b_disco
+<<<<<<< HEAD
+=======
+      - stm32f3_disco
+      - stm32h573i_dk
+      - stm32u083c_dk
+>>>>>>> 456992ba9ac (tests: drivers: i2c: i2c_target_api: update i2c_target_api)
       - nucleo_g071rb
       - nucleo_f207zg
       - nucleo_f429zi
       - nucleo_wl55jc
       - nucleo_l073rz
       - nucleo_l152re
+<<<<<<< HEAD
+=======
+      - nucleo_u083rc
+      - nucleo_wb55rg
+>>>>>>> 456992ba9ac (tests: drivers: i2c: i2c_target_api: update i2c_target_api)
       - rpi_pico
       - efr32bg22_brd4184a
       - mr_canhubk3
