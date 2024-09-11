@@ -460,6 +460,7 @@ static void adc_stm32_disable(ADC_TypeDef *adc)
 	!DT_HAS_COMPAT_STATUS_OKAY(st_stm32f4_adc) && \
 	!defined(CONFIG_SOC_SERIES_STM32G0X) && \
 	!defined(CONFIG_SOC_SERIES_STM32L0X) && \
+	!defined(CONFIG_SOC_SERIES_STM32U0X) && \
 	!defined(CONFIG_SOC_SERIES_STM32WBAX) && \
 	!defined(CONFIG_SOC_SERIES_STM32WLX)
 	if (LL_ADC_INJ_IsConversionOngoing(adc)) {
@@ -477,6 +478,178 @@ static void adc_stm32_disable(ADC_TypeDef *adc)
 	while (LL_ADC_IsEnabled(adc) == 1UL) {
 	}
 }
+
+#if !DT_HAS_COMPAT_STATUS_OKAY(st_stm32f4_adc)
+
+#define HAS_CALIBRATION
+
+/* Number of ADC clock cycles to wait before of after starting calibration */
+#if defined(LL_ADC_DELAY_CALIB_ENABLE_ADC_CYCLES)
+#define ADC_DELAY_CALIB_ADC_CYCLES	LL_ADC_DELAY_CALIB_ENABLE_ADC_CYCLES
+#elif defined(LL_ADC_DELAY_ENABLE_CALIB_ADC_CYCLES)
+#define ADC_DELAY_CALIB_ADC_CYCLES	LL_ADC_DELAY_ENABLE_CALIB_ADC_CYCLES
+#elif defined(LL_ADC_DELAY_DISABLE_CALIB_ADC_CYCLES)
+#define ADC_DELAY_CALIB_ADC_CYCLES	LL_ADC_DELAY_DISABLE_CALIB_ADC_CYCLES
+#endif
+
+static void adc_stm32_calibration_delay(const struct device *dev)
+{
+	/*
+	 * Calibration of F1 and F3 (ADC1_V2_5) must start two cycles after ADON
+	 * is set.
+	 * Other ADC modules have to wait for some cycles after calibration to
+	 * be enabled.
+	 */
+	const struct adc_stm32_cfg *config = dev->config;
+	const struct device *const clk = DEVICE_DT_GET(STM32_CLOCK_CONTROL_NODE);
+	uint32_t adc_rate, wait_cycles;
+
+	if (clock_control_get_rate(clk,
+		(clock_control_subsys_t) &config->pclken[0], &adc_rate) < 0) {
+		LOG_ERR("ADC clock rate get error.");
+	}
+
+	if (adc_rate == 0) {
+		LOG_ERR("ADC Clock rate null");
+		return;
+	}
+	wait_cycles = SystemCoreClock / adc_rate *
+		      ADC_DELAY_CALIB_ADC_CYCLES;
+
+	for (int i = wait_cycles; i >= 0; i--) {
+	}
+}
+
+static void adc_stm32_calibration_start(const struct device *dev)
+{
+	const struct adc_stm32_cfg *config =
+		(const struct adc_stm32_cfg *)dev->config;
+	ADC_TypeDef *adc = config->base;
+
+#if defined(STM32F3X_ADC_V1_1) || \
+	defined(CONFIG_SOC_SERIES_STM32L4X) || \
+	defined(CONFIG_SOC_SERIES_STM32L5X) || \
+	defined(CONFIG_SOC_SERIES_STM32H5X) || \
+	defined(CONFIG_SOC_SERIES_STM32H7RSX) || \
+	defined(CONFIG_SOC_SERIES_STM32WBX) || \
+	defined(CONFIG_SOC_SERIES_STM32G4X)
+	LL_ADC_StartCalibration(adc, LL_ADC_SINGLE_ENDED);
+#elif defined(CONFIG_SOC_SERIES_STM32C0X) || \
+	defined(CONFIG_SOC_SERIES_STM32F0X) || \
+	DT_HAS_COMPAT_STATUS_OKAY(st_stm32f1_adc) || \
+	defined(CONFIG_SOC_SERIES_STM32G0X) || \
+	defined(CONFIG_SOC_SERIES_STM32L0X) || \
+	defined(CONFIG_SOC_SERIES_STM32U0X) || \
+	defined(CONFIG_SOC_SERIES_STM32WLX) || \
+	defined(CONFIG_SOC_SERIES_STM32WBAX)
+
+	LL_ADC_StartCalibration(adc);
+#elif defined(CONFIG_SOC_SERIES_STM32U5X)
+	if (adc != ADC4) {
+		uint32_t dev_id = LL_DBGMCU_GetDeviceID();
+		uint32_t rev_id = LL_DBGMCU_GetRevisionID();
+
+		/* Some U5 implement an extended calibration to enhance ADC performance.
+		 * It is not available for ADC4.
+		 * It is available on all U5 except U575/585 (dev ID 482) revision X (rev ID 2001).
+		 * The code below applies the procedure described in RM0456 in the ADC chapter:
+		 * "Extended calibration mode"
+		 */
+		if ((dev_id != 0x482UL) && (rev_id != 0x2001UL)) {
+			adc_stm32_enable(adc);
+			MODIFY_REG(adc->CR, ADC_CR_CALINDEX, 0x9UL << ADC_CR_CALINDEX_Pos);
+			__DMB();
+			MODIFY_REG(adc->CALFACT2, 0xFFFFFF00UL, 0x03021100UL);
+			__DMB();
+			SET_BIT(adc->CALFACT, ADC_CALFACT_LATCH_COEF);
+			adc_stm32_disable(adc);
+		}
+	}
+	LL_ADC_StartCalibration(adc, LL_ADC_CALIB_OFFSET);
+#elif defined(CONFIG_SOC_SERIES_STM32H7X)
+	LL_ADC_StartCalibration(adc, LL_ADC_CALIB_OFFSET, LL_ADC_SINGLE_ENDED);
+#endif
+	/* Make sure ADCAL is cleared before returning for proper operations
+	 * on the ADC control register, for enabling the peripheral for example
+	 */
+	while (LL_ADC_IsCalibrationOnGoing(adc)) {
+	}
+}
+
+static int adc_stm32_calibrate(const struct device *dev)
+{
+	const struct adc_stm32_cfg *config =
+		(const struct adc_stm32_cfg *)dev->config;
+	ADC_TypeDef *adc = config->base;
+	int err;
+
+#if defined(CONFIG_ADC_STM32_DMA)
+#if defined(CONFIG_SOC_SERIES_STM32C0X) || \
+	defined(CONFIG_SOC_SERIES_STM32F0X) || \
+	defined(CONFIG_SOC_SERIES_STM32G0X) || \
+	defined(CONFIG_SOC_SERIES_STM32H7RSX) || \
+	defined(CONFIG_SOC_SERIES_STM32L0X) || \
+	defined(CONFIG_SOC_SERIES_STM32U0X) || \
+	defined(CONFIG_SOC_SERIES_STM32WBAX) || \
+	defined(CONFIG_SOC_SERIES_STM32WLX)
+	/* Make sure DMA is disabled before starting calibration */
+	LL_ADC_REG_SetDMATransfer(adc, LL_ADC_REG_DMA_TRANSFER_NONE);
+#elif defined(CONFIG_SOC_SERIES_STM32U5X)
+	if (adc == ADC4) {
+		/* Make sure DMA is disabled before starting calibration */
+		LL_ADC_REG_SetDMATransfer(adc, LL_ADC_REG_DMA_TRANSFER_NONE);
+	}
+#endif /* CONFIG_SOC_SERIES_* */
+#endif /* CONFIG_ADC_STM32_DMA */
+
+#if !DT_HAS_COMPAT_STATUS_OKAY(st_stm32f1_adc)
+	adc_stm32_disable(adc);
+	adc_stm32_calibration_start(dev);
+	adc_stm32_calibration_delay(dev);
+#endif /* !DT_HAS_COMPAT_STATUS_OKAY(st_stm32f1_adc) */
+
+	err = adc_stm32_enable(adc);
+	if (err < 0) {
+		return err;
+	}
+
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32f1_adc)
+	adc_stm32_calibration_delay(dev);
+	adc_stm32_calibration_start(dev);
+#endif /* DT_HAS_COMPAT_STATUS_OKAY(st_stm32f1_adc) */
+
+#if defined(CONFIG_SOC_SERIES_STM32H7X) && \
+	defined(CONFIG_CPU_CORTEX_M7)
+	/*
+	 * To ensure linearity the factory calibration values
+	 * should be loaded on initialization.
+	 */
+	uint32_t channel_offset = 0U;
+	uint32_t linear_calib_buffer = 0U;
+
+	if (adc == ADC1) {
+		channel_offset = 0UL;
+	} else if (adc == ADC2) {
+		channel_offset = 8UL;
+	} else   /*Case ADC3*/ {
+		channel_offset = 16UL;
+	}
+	/* Read factory calibration factors */
+	for (uint32_t count = 0UL; count < ADC_LINEAR_CALIB_REG_COUNT; count++) {
+		linear_calib_buffer = *(uint32_t *)(
+			ADC_LINEAR_CALIB_REG_1_ADDR + channel_offset + count
+		);
+
+		LL_ADC_SetCalibrationLinearFactor(
+			adc, LL_ADC_CALIB_LINEARITY_WORD1 << count,
+			linear_calib_buffer
+		);
+	}
+#endif /* CONFIG_SOC_SERIES_STM32H7X */
+
+	return 0;
+}
+#endif /* !DT_HAS_COMPAT_STATUS_OKAY(st_stm32f4_adc) */
 
 #if !defined(CONFIG_SOC_SERIES_STM32F0X) && \
 	!defined(CONFIG_SOC_SERIES_STM32F1X) && \
@@ -1207,6 +1380,7 @@ static int adc_stm32_set_clock(const struct device *dev)
 #elif defined(CONFIG_SOC_SERIES_STM32C0X) || \
 	defined(CONFIG_SOC_SERIES_STM32G0X) || \
 	defined(CONFIG_SOC_SERIES_STM32L0X) || \
+	defined(CONFIG_SOC_SERIES_STM32U0X) || \
 	(defined(CONFIG_SOC_SERIES_STM32WBX) && defined(ADC_SUPPORT_2_5_MSPS)) || \
 	defined(CONFIG_SOC_SERIES_STM32WLX)
 	if ((config->clk_prescaler == LL_ADC_CLOCK_SYNC_PCLK_DIV1) ||
