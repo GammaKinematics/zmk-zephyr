@@ -1,0 +1,20 @@
+# ST Microelectronics STM32U0 MCU line
+
+# Copyright (c) 2021 Linaro Limited
+# Copyright (c) 2023 PSICONTROL nv
+# SPDX-License-Identifier: Apache-2.0
+
+choice
+prompt "STM32U0x MCU Selection"
+depends on SOC_SERIES_STM32U0X
+
+config SOC_STM32U031XX
+	bool "STM32U031XX"
+
+config SOC_STM32U073XX
+	bool "STM32U073XX"
+
+config SOC_STM32U083XX
+	bool "STM32U083XX"
+
+endchoice
