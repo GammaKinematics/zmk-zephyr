@@ -12,6 +12,11 @@
 
 #include <zephyr/drivers/clock_control.h>
 
+/* v3.5.0 compatibility - translate v4.1.0 device tree macros */
+#ifndef DT_NODE_HAS_STATUS_OKAY
+#define DT_NODE_HAS_STATUS_OKAY(node_id) DT_NODE_HAS_STATUS(node_id, okay)
+#endif
+
 #if defined(CONFIG_SOC_SERIES_STM32C0X)
 #include <zephyr/dt-bindings/clock/stm32c0_clock.h>
 #elif defined(CONFIG_SOC_SERIES_STM32F0X)
