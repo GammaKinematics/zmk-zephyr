@@ -15,7 +15,7 @@
 
 #ifndef _ASMLANGUAGE
 
-#include <stm32g0xx.h>
+#include <stm32u0xx.h>
 
 #endif /* !_ASMLANGUAGE */
 
