@@ -393,8 +393,8 @@
 			interrupts = <2 0>;
 			clocks = <&rcc STM32_CLOCK(APB1, 10U)>;
 			prescaler = <32768>;
-			alarms-count = <2>;
-			alrm-exti-line = <28>;
+			//alarms-count = <2>;
+			//alrm-exti-line = <28>;
 			status = "disabled";
 		};
 
